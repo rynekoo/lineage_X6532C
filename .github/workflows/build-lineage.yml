@@ -56,12 +56,15 @@ jobs:
         run: |
           echo "before:"; df -h /
           sudo rm -rf \
+            /opt/hostedtoolcache \
             /usr/local/lib/android \
             /usr/share/dotnet \
-            /opt/ghc \
             /usr/local/share/boost \
             /usr/local/share/powershell \
-            /opt/hostedtoolcache/CodeQL
+            /opt/ghc \
+            /usr/share/swift \
+            /usr/local/.ghcup \
+            /var/lib/docker
           sudo apt-get clean
           echo "after:"; df -h /
 
@@ -114,12 +117,28 @@ jobs:
       - name: repo sync
         run: |
           cd "$BUILD_DIR"
-          repo sync -c --force-sync --no-clone-bundle --no-tags -j$(nproc)
+          repo sync -c --force-sync --no-clone-bundle --no-tags --optimized-fetch --prune -j$(nproc)
           echo "--- disk after sync ---"
           df -h /
           du -sh "$BUILD_DIR" 2>/dev/null || true
           echo "--- device tree present? ---"
           ls -la device/infinix/X6532C/BoardConfig.mk vendor/infinix/X6532C/X6532C-vendor.mk
+
+      # ------------------------------------------------------------------
+      # A depth=1 LineageOS 19.1 checkout stores each project twice: the
+      # working tree and a bare mirror under .repo. The build only ever
+      # reads the working tree, so the mirrors are dropped here to free
+      # the space that out/ needs. Nothing that follows calls repo.
+      # ------------------------------------------------------------------
+      - name: Trim .repo mirrors to make room for out/
+        run: |
+          cd "$BUILD_DIR"
+          echo "--- .repo before ---"
+          du -sh .repo 2>/dev/null || true
+          rm -rf .repo/projects .repo/project-objects .repo/manifests.git
+          echo "--- .repo after ---"
+          du -sh .repo 2>/dev/null || true
+          df -h /
 
       - name: Build
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.sync_only != true }}
