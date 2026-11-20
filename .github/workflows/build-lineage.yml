@@ -64,8 +64,15 @@ jobs:
             /opt/ghc \
             /usr/share/swift \
             /usr/local/.ghcup \
-            /var/lib/docker
+            /var/lib/docker \
+            /usr/local/lib/node_modules \
+            /opt/microsoft \
+            /usr/share/miniconda \
+            /usr/lib/mono \
+            /usr/local/share/chromium \
+            /usr/share/gradle
           sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
           echo "after:"; df -h /
 
       - name: Install build dependencies
@@ -158,8 +165,15 @@ jobs:
           echo "--- $OUT ---"
           ls -la "$OUT" 2>/dev/null || true
           cp -v "$OUT"/*.zip  "$GITHUB_WORKSPACE/artifacts/" 2>/dev/null || true
-          cp -v "$OUT"/*.img  "$GITHUB_WORKSPACE/artifacts/" 2>/dev/null || true
+          # Every image except userdata (that one is a blank template the
+          # device regenerates on first boot).
+          for i in boot vendor_boot dtbo vbmeta vbmeta_system vbmeta_vendor \
+                   super system system_ext vendor product; do
+            [ -f "$OUT/$i.img" ] && cp -v "$OUT/$i.img" "$GITHUB_WORKSPACE/artifacts/"
+          done
           cp -v "$OUT"/recovery/* "$GITHUB_WORKSPACE/artifacts/" 2>/dev/null || true
+          echo "--- disk after build ---"
+          df -h /
           echo "--- collected ---"
           ls -la "$GITHUB_WORKSPACE/artifacts" 2>/dev/null || true
 
