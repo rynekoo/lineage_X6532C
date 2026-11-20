@@ -1,0 +1,6 @@
+# LineageOS source tree and build output land here on the runner, never in git.
+lineage/
+out/
+artifacts/
+*.img
+*.zip

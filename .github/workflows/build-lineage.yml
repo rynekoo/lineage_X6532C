@@ -1,0 +1,163 @@
+name: Build LineageOS 19.1 (X6532C)
+
+# ROM build for the Infinix Smart 9 HD (X6532C, MT6765).
+#
+# The sources live in the rom-dev repos under the ryu4nn account:
+#   device/infinix/X6532C  <- ryu4nn/android_device_infinix_X6532C (lineage-19.1)
+#   vendor/infinix/X6532C  <- ryu4nn/android_vendor_infinix_X6532C (main)
+# They are pulled in through a local manifest written at run time, so this
+# repository only has to carry the workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Soong target (bacon, systemimage, otapackage, ...)"
+        required: false
+        default: "bacon"
+      sync_only:
+        description: "Only sync the tree, skip the build"
+        type: boolean
+        required: false
+        default: false
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - "**.md"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEVICE: X6532C
+  LINEAGE_BRANCH: lineage-19.1
+  DEVICE_TREE_REPO: ryu4nn/android_device_infinix_X6532C
+  DEVICE_TREE_REV: lineage-19.1
+  VENDOR_REPO: ryu4nn/android_vendor_infinix_X6532C
+  VENDOR_REV: main
+  BUILD_DIR: /home/runner/lineage
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 355
+
+    steps:
+      - name: Checkout this workflow repository
+        uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------
+      # The stock GitHub runner has ~65 GB free. A LineageOS 19.1 checkout
+      # plus out/ needs almost all of it, so the preinstalled toolchains and
+      # SDKs that this build never touches are removed first.
+      # ------------------------------------------------------------------
+      - name: Free disk space
+        run: |
+          echo "before:"; df -h /
+          sudo rm -rf \
+            /usr/local/lib/android \
+            /usr/share/dotnet \
+            /opt/ghc \
+            /usr/local/share/boost \
+            /usr/local/share/powershell \
+            /opt/hostedtoolcache/CodeQL
+          sudo apt-get clean
+          echo "after:"; df -h /
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison build-essential ccache curl flex g++-multilib gcc-multilib \
+            git git-lfs gnupg gperf imagemagick lib32readline-dev lib32z1-dev \
+            libelf-dev liblz4-tool libsdl1.2-dev libssl-dev libxml2 libxml2-utils \
+            lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev \
+            openjdk-11-jdk
+          java -version
+
+      - name: Set up git and the repo tool
+        run: |
+          git config --global user.name  "rynekoo"
+          git config --global user.email "rynekoo@users.noreply.github.com"
+          git config --global color.ui false
+          mkdir -p ~/bin
+          curl -s https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+          ~/bin/repo --version
+
+      - name: repo init
+        run: |
+          mkdir -p "$BUILD_DIR"
+          cd "$BUILD_DIR"
+          repo init --depth=1 -u https://github.com/LineageOS/android.git -b "$LINEAGE_BRANCH"
+
+      - name: Write the device + vendor local manifest
+        run: |
+          mkdir -p "$BUILD_DIR/.repo/local_manifests"
+          cat > "$BUILD_DIR/.repo/local_manifests/X6532C.xml" <<'XML'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <manifest>
+            <project name="ryu4nn/android_device_infinix_X6532C"
+                     path="device/infinix/X6532C"
+                     remote="github"
+                     revision="lineage-19.1" />
+            <project name="ryu4nn/android_vendor_infinix_X6532C"
+                     path="vendor/infinix/X6532C"
+                     remote="github"
+                     revision="main" />
+          </manifest>
+          XML
+          cat "$BUILD_DIR/.repo/local_manifests/X6532C.xml"
+
+      - name: repo sync
+        run: |
+          cd "$BUILD_DIR"
+          repo sync -c --force-sync --no-clone-bundle --no-tags -j$(nproc)
+          echo "--- disk after sync ---"
+          df -h /
+          du -sh "$BUILD_DIR" 2>/dev/null || true
+          echo "--- device tree present? ---"
+          ls -la device/infinix/X6532C/BoardConfig.mk vendor/infinix/X6532C/X6532C-vendor.mk
+
+      - name: Build
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.sync_only != true }}
+        run: |
+          cd "$BUILD_DIR"
+          source build/envsetup.sh
+          lunch lineage_X6532C-userdebug
+          mka "${TARGET:-bacon}" -j$(nproc)
+        env:
+          TARGET: ${{ github.event.inputs.target || 'bacon' }}
+
+      - name: Collect artifacts
+        if: always()
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
+          OUT="$BUILD_DIR/out/target/product/$DEVICE"
+          echo "--- $OUT ---"
+          ls -la "$OUT" 2>/dev/null || true
+          cp -v "$OUT"/*.zip  "$GITHUB_WORKSPACE/artifacts/" 2>/dev/null || true
+          cp -v "$OUT"/*.img  "$GITHUB_WORKSPACE/artifacts/" 2>/dev/null || true
+          cp -v "$OUT"/recovery/* "$GITHUB_WORKSPACE/artifacts/" 2>/dev/null || true
+          echo "--- collected ---"
+          ls -la "$GITHUB_WORKSPACE/artifacts" 2>/dev/null || true
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lineage-19.1-X6532C-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ github.run_number }}
+          path: /home/runner/lineage/out/verbose.log.gz
+          if-no-files-found: ignore
+          retention-days: 7
