@@ -137,16 +137,32 @@ jobs:
 
       # ------------------------------------------------------------------
       # A depth=1 LineageOS 19.1 checkout stores each project twice: the
-      # working tree and a bare mirror under .repo. The build only ever
-      # reads the working tree, so the mirrors are dropped here to free
-      # the space that out/ needs. Nothing that follows calls repo.
+      # working tree and a bare mirror under .repo, ~23 GB in total. The
+      # build only reads the working tree, with one exception: the rule
+      # that writes build-manifest.xml runs
+      #
+      #   python3 .repo/repo/repo manifest -o - -r
+      #
+      # and `-r` resolves each project's HEAD out of .repo/projects and
+      # .repo/project-objects, so the mirrors cannot simply be deleted.
+      # Instead the manifest is produced while the metadata is intact,
+      # the mirrors are dropped, and `repo` is replaced with a stub that
+      # replays the recorded manifest. It takes no other arguments and
+      # nothing else in the tree calls repo (vendor/lineage/config/
+      # version.mk is date based and never invokes git).
       # ------------------------------------------------------------------
-      - name: Trim .repo mirrors to make room for out/
+      - name: Trim .repo and record the manifest
         run: |
           cd "$BUILD_DIR"
           echo "--- .repo before ---"
           du -sh .repo 2>/dev/null || true
+          python3 .repo/repo/repo manifest -o - -r > "$GITHUB_WORKSPACE/build-manifest.xml"
+          grep -c "<project " "$GITHUB_WORKSPACE/build-manifest.xml"
           rm -rf .repo/projects .repo/project-objects .repo/manifests.git
+          printf 'import sys\nsys.stdout.write(open("%s").read())\n' \
+            "$GITHUB_WORKSPACE/build-manifest.xml" > .repo/repo/repo
+          echo "--- stub replays manifest? ---"
+          python3 .repo/repo/repo manifest -o - -r | grep -c "<project "
           echo "--- .repo after ---"
           du -sh .repo 2>/dev/null || true
           df -h /
@@ -192,13 +208,17 @@ jobs:
           du -sh "$BUILD_DIR" 2>/dev/null || true
 
       # Parsing the whole module graph costs a minute and proves the trims
-      # above did not remove anything a blueprint refers to.
+      # above did not remove anything a blueprint refers to. The second
+      # command exercises the repo stub through the real build rule, which
+      # is the one thing `m nothing` cannot cover.
       - name: Validate module graph
         run: |
           cd "$BUILD_DIR"
           source build/envsetup.sh
           lunch lineage_X6532C-userdebug
           m nothing
+          m "out/target/product/$DEVICE/obj/ETC/build-manifest_intermediates/build-manifest.xml"
+          wc -c "out/target/product/$DEVICE/obj/ETC/build-manifest_intermediates/build-manifest.xml"
 
       # droid is the AOSP default goal (DEFAULT_GOAL := droid in
       # core/main.mk). It builds droidcore-unbundled: system, system_ext,
