@@ -287,7 +287,7 @@ jobs:
             passwd_odm passwd_product plat_property_contexts \
             system_ext_property_contexts product_property_contexts \
             vendor_property_contexts odm_property_contexts
-          verify="$OUT/host/linux-x86/bin/host_init_verifier"
+          verify="$ANDROID_HOST_OUT/bin/host_init_verifier"
           failed=0
           while IFS= read -r rc; do
             "$verify" \
