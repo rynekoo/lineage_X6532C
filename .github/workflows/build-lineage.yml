@@ -220,32 +220,27 @@ jobs:
           df -h /
           du -sh "$BUILD_DIR" 2>/dev/null || true
 
-      # Lineage rewrites every cc module that lists device_kernel_headers to
+      # Lineage rewrites both device_kernel_headers and qti_kernel_headers to
       # generated_kernel_headers (build/soong/cc/cc.go, rewriteHeaderLibs),
       # and that module's rule runs `make headers_install` inside
       # $(TARGET_KERNEL_SOURCE). This device ships a prebuilt GKI kernel and
-      # has no kernel source tree, so the rewrite is dropped here and the
-      # AOSP placeholder module is used unchanged. bionic's libc already
-      # exports kernel/uapi to every module that links libc, which is what
-      # libtinycompress needs (sound/asound.h, sound/compress_offload.h).
+      # has no kernel source tree, so both names are pointed at the AOSP
+      # device_kernel_headers placeholder instead. bionic's libc already
+      # exports kernel/uapi to every module that links libc, which covers
+      # what these modules include (sound/asound.h, linux/types.h, asm/*).
       - name: Keep AOSP kernel headers for the prebuilt kernel
         run: |
           cd "$BUILD_DIR"
-          awk '
-            /Replace device_kernel_headers with generated_kernel_headers/ { skip = 1; next }
-            skip == 1 && /^\t\t\t\t}$/ {
-              skip = 0
-              print "\t\t\t\t// This device ships a prebuilt kernel and has no kernel source"
-              print "\t\t\t\t// tree, so keep the AOSP device_kernel_headers placeholder"
-              print "\t\t\t\t// instead of redirecting to generated_kernel_headers."
-              next
-            }
-            skip == 1 { next }
-            { print }
-          ' build/soong/cc/cc.go > cc.go.patched
-          grep -q "keep the AOSP device_kernel_headers placeholder" cc.go.patched
-          grep -c "generated_kernel_headers" cc.go.patched || true
-          mv cc.go.patched build/soong/cc/cc.go
+          sed -i \
+            -e 's|// Replace device_kernel_headers with generated_kernel_headers|// Point both names at the AOSP device_kernel_headers placeholder|' \
+            -e 's|// for inline kernel building|// (prebuilt kernel: no source tree for headers_install)|' \
+            -e 's|newHeaderLibs = append(newHeaderLibs, "generated_kernel_headers")|newHeaderLibs = append(newHeaderLibs, "device_kernel_headers")|' \
+            build/soong/cc/cc.go
+          grep -q 'newHeaderLibs = append(newHeaderLibs, "device_kernel_headers")' build/soong/cc/cc.go
+          if grep -q '"generated_kernel_headers"' build/soong/cc/cc.go; then
+            echo "generated_kernel_headers is still referenced"; exit 1
+          fi
+          sed -n '/rewriteHeaderLibs := func/,/^		}/p' build/soong/cc/cc.go
 
       # Parsing the whole module graph costs a minute and proves the trims
       # above did not remove anything a blueprint refers to. The second
