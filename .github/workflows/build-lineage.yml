@@ -153,11 +153,18 @@ jobs:
 
       # ------------------------------------------------------------------
       # out/ needs ~50 GB and this runner has ~54 GB left after the
-      # checkout. Only prebuilts/qemu-kernel is dropped here: it is an
-      # emulator kernel referenced from board makefiles, not from any
-      # Android.bp, so it cannot affect soong's module graph. cts/ and
-      # test/ must stay even though they are not built -- they define
-      # VtsHalDriverDefaults, vts_proto_fuzzer_default and
+      # checkout. Two trims are safe:
+      #
+      #  * prebuilts/qemu-kernel is an emulator kernel referenced from
+      #    board makefiles, not from any Android.bp.
+      #  * prebuilts/clang/host/linux-x86 carries every toolchain revision
+      #    AOSP supports. A 19.1 device build uses exactly two: the
+      #    platform compiler (cc/config/global.go: ClangDefaultVersion =
+      #    "clang-r416183b1") and the RenderScript one (RSClangVersion =
+      #    "clang-3289846"). Only those two are kept.
+      #
+      # cts/ and test/ must stay even though they are not built: they
+      # define VtsHalDriverDefaults, vts_proto_fuzzer_default and
       # cts_support_defaults, which Android.bp files elsewhere reference.
       # ------------------------------------------------------------------
       - name: Reclaim space for out/
@@ -165,10 +172,33 @@ jobs:
           cd "$BUILD_DIR"
           echo "--- top level sizes ---"
           du -sh --exclude=.repo * 2>/dev/null | sort -h | tail -20
+          echo "--- prebuilts sizes ---"
+          du -sh prebuilts/* 2>/dev/null | sort -h | tail -15
+
           rm -rf prebuilts/qemu-kernel
+
+          CLANG_DIR=prebuilts/clang/host/linux-x86
+          echo "--- clang revisions present ---"
+          du -sh "$CLANG_DIR"/clang-* 2>/dev/null | sort -h
+          for d in "$CLANG_DIR"/clang-*; do
+            case "$(basename "$d")" in
+              clang-r416183b1|clang-3289846) ;;
+              *) echo "dropping $d"; rm -rf "$d" ;;
+            esac
+          done
+
           echo "--- after ---"
           df -h /
           du -sh "$BUILD_DIR" 2>/dev/null || true
+
+      # Parsing the whole module graph costs a minute and proves the trims
+      # above did not remove anything a blueprint refers to.
+      - name: Validate module graph
+        run: |
+          cd "$BUILD_DIR"
+          source build/envsetup.sh
+          lunch lineage_X6532C-userdebug
+          m nothing
 
       # droid is the AOSP default goal (DEFAULT_GOAL := droid in
       # core/main.mk). It builds droidcore-unbundled: system, system_ext,
