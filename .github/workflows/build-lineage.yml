@@ -152,18 +152,20 @@ jobs:
           df -h /
 
       # ------------------------------------------------------------------
-      # out/ needs ~55 GB and this runner only has ~50 after the checkout.
-      # These trees are test/emulator tooling that droid never builds, so
-      # dropping them buys headroom instead of risking a late ENOSPC.
-      # Sizes are printed because the biggest consumers are worth knowing
-      # if another round of trimming is needed.
+      # out/ needs ~50 GB and this runner has ~54 GB left after the
+      # checkout. Only prebuilts/qemu-kernel is dropped here: it is an
+      # emulator kernel referenced from board makefiles, not from any
+      # Android.bp, so it cannot affect soong's module graph. cts/ and
+      # test/ must stay even though they are not built -- they define
+      # VtsHalDriverDefaults, vts_proto_fuzzer_default and
+      # cts_support_defaults, which Android.bp files elsewhere reference.
       # ------------------------------------------------------------------
       - name: Reclaim space for out/
         run: |
           cd "$BUILD_DIR"
           echo "--- top level sizes ---"
           du -sh --exclude=.repo * 2>/dev/null | sort -h | tail -20
-          rm -rf cts developers platform_testing test prebuilts/qemu-kernel
+          rm -rf prebuilts/qemu-kernel
           echo "--- after ---"
           df -h /
           du -sh "$BUILD_DIR" 2>/dev/null || true
