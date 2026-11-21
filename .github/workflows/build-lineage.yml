@@ -210,12 +210,31 @@ jobs:
           CLANG_DIR=prebuilts/clang/host/linux-x86
           echo "--- clang revisions present ---"
           du -sh "$CLANG_DIR"/clang-* 2>/dev/null | sort -h
-          for d in "$CLANG_DIR"/clang-*; do
-            case "$(basename "$d")" in
-              clang-r416183b1|clang-3289846) ;;
-              *) echo "dropping $d"; rm -rf "$d" ;;
-            esac
-          done
+
+          # The keep list is derived from build/soong instead of hard coded.
+          # Three separate constants pick a revision: ClangDefaultVersion and
+          # RSClangVersion in cc/config/global.go, and bindgenClangVersion in
+          # rust/bindgen.go. Dropping one breaks the build far from where it
+          # is declared - clang-r416183b1 and clang-r416183b differ by a digit
+          # and a missing libclang surfaces as a bindgen panic late in the run.
+          REFERENCED=$(grep -rhoE 'clang-(r[0-9a-z]+|[0-9]{6,})' build/soong 2>/dev/null | sort -u)
+          echo "--- revisions referenced by build/soong ---"
+          echo "$REFERENCED" | tr '\n' ' '; echo
+          if [ -z "$REFERENCED" ]; then
+            echo "nothing derived from build/soong; keeping every toolchain"
+          else
+            for d in "$CLANG_DIR"/*; do
+              [ -d "$d" ] || continue
+              name=$(basename "$d")
+              case "$name" in clang-*) ;; *) continue ;; esac
+              if echo "$REFERENCED" | grep -qx -- "$name"; then
+                echo "keeping $name"
+              else
+                echo "dropping $name"
+                rm -rf "$d"
+              fi
+            done
+          fi
 
           echo "--- after ---"
           df -h /
@@ -256,6 +275,10 @@ jobs:
           # libtinycompress is the only module here that asks for kernel
           # headers, so building it proves the patch below is sufficient.
           m libtinycompress
+          # bindgen resolves libclang through LIBCLANG_PATH and panicked at
+          # 62% of run #20 when clang-r416183b had been pruned, so build it
+          # here rather than discovering it three quarters of the way in.
+          m libbinder_ndk_bindgen
           m "out/target/product/$DEVICE/obj/ETC/build-manifest_intermediates/build-manifest.xml"
           wc -c "out/target/product/$DEVICE/obj/ETC/build-manifest_intermediates/build-manifest.xml"
 
