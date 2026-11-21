@@ -83,7 +83,11 @@ jobs:
             git git-lfs gnupg gperf imagemagick lib32readline-dev lib32z1-dev \
             libelf-dev liblz4-tool libsdl1.2-dev libssl-dev libxml2 libxml2-utils \
             lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev \
-            openjdk-11-jdk
+            openjdk-11-jdk \
+            libncurses5 libtinfo5
+          # The RenderScript prebuilt is LLVM 3.8 (prebuilts/clang/host/linux-x86/
+          # clang-3289846) and still links against libncurses.so.5/libtinfo.so.5,
+          # which Ubuntu 22.04 no longer ships by default.
           java -version
 
       - name: Set up git and the repo tool
@@ -147,6 +151,23 @@ jobs:
           du -sh .repo 2>/dev/null || true
           df -h /
 
+      # ------------------------------------------------------------------
+      # out/ needs ~55 GB and this runner only has ~50 after the checkout.
+      # These trees are test/emulator tooling that droid never builds, so
+      # dropping them buys headroom instead of risking a late ENOSPC.
+      # Sizes are printed because the biggest consumers are worth knowing
+      # if another round of trimming is needed.
+      # ------------------------------------------------------------------
+      - name: Reclaim space for out/
+        run: |
+          cd "$BUILD_DIR"
+          echo "--- top level sizes ---"
+          du -sh --exclude=.repo * 2>/dev/null | sort -h | tail -20
+          rm -rf cts developers platform_testing test prebuilts/qemu-kernel
+          echo "--- after ---"
+          df -h /
+          du -sh "$BUILD_DIR" 2>/dev/null || true
+
       # droid is the AOSP default goal (DEFAULT_GOAL := droid in
       # core/main.mk). It builds droidcore-unbundled: system, system_ext,
       # vendor, product, boot, vendor_boot, vbmeta*, userdata and
@@ -160,8 +181,11 @@ jobs:
           cd "$BUILD_DIR"
           source build/envsetup.sh
           lunch lineage_X6532C-userdebug
-          # Disk growth is the known failure mode on this runner; sample it
-          # so a later ENOSPC has data behind it.
+          # No AOT compilation of the boot classpath. It removes a few GB of
+          # odex/vdex intermediates and is the supported way to cut both disk
+          # and build time; first boot runs the JIT instead, which is fine
+          # for a bring-up build.
+          export WITH_DEXPREOPT=false
           ( while true; do
               echo "--- $(date -u +%FT%TZ) ---"
               df -h / | tail -1
