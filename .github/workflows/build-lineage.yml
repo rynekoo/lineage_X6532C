@@ -12,9 +12,9 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: "Soong target(s) (bacon, otapackage, or a space separated image list)"
+        description: "Soong goal (droid = all images without OTA, bacon, otapackage)"
         required: false
-        default: "systemimage system_extimage productimage vendorimage bootimage vendor_bootimage dtboimage vbmetaimage vbmeta_systemimage vbmeta_vendorimage"
+        default: "droid"
       sync_only:
         description: "Only sync the tree, skip the build"
         type: boolean
@@ -147,20 +147,30 @@ jobs:
           du -sh .repo 2>/dev/null || true
           df -h /
 
-      # Images only by default. bacon additionally builds target_files,
-      # super.img and the payload OTA, which duplicates every image on disk
-      # (~15 GB) and spends 20-30 min compressing them, for a zip that the
-      # stock recovery rejects anyway (AOSP test-keys). super.img is
-      # reassembled from these images after the run.
+      # droid is the AOSP default goal (DEFAULT_GOAL := droid in
+      # core/main.mk). It builds droidcore-unbundled: system, system_ext,
+      # vendor, product, boot, vendor_boot, vbmeta*, userdata and
+      # super_empty.img, plus dtbo.img transitively through vbmeta.img.
+      # It does not build target_files or the payload OTA, which would
+      # duplicate every image on disk (~15 GB) and spend 20-30 min
+      # compressing them into a zip the stock recovery rejects anyway.
       - name: Build
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.sync_only != true }}
         run: |
           cd "$BUILD_DIR"
           source build/envsetup.sh
           lunch lineage_X6532C-userdebug
-          mka ${TARGET:-systemimage} -j$(nproc)
+          # Disk growth is the known failure mode on this runner; sample it
+          # so a later ENOSPC has data behind it.
+          ( while true; do
+              echo "--- $(date -u +%FT%TZ) ---"
+              df -h / | tail -1
+              du -sh out 2>/dev/null
+              sleep 600
+            done ) > "$GITHUB_WORKSPACE/disk-monitor.log" 2>&1 &
+          mka ${TARGET:-droid} -j$(nproc)
         env:
-          TARGET: ${{ github.event.inputs.target || 'systemimage system_extimage productimage vendorimage bootimage vendor_bootimage dtboimage vbmetaimage vbmeta_systemimage vbmeta_vendorimage' }}
+          TARGET: ${{ github.event.inputs.target || 'droid' }}
 
       - name: Collect artifacts
         if: always()
@@ -173,10 +183,12 @@ jobs:
           # Every image except userdata (that one is a blank template the
           # device regenerates on first boot).
           for i in boot vendor_boot dtbo vbmeta vbmeta_system vbmeta_vendor \
-                   super system system_ext vendor product; do
+                   super super_empty system system_ext vendor product; do
             [ -f "$OUT/$i.img" ] && cp -v "$OUT/$i.img" "$GITHUB_WORKSPACE/artifacts/"
           done
           cp -v "$OUT"/recovery/* "$GITHUB_WORKSPACE/artifacts/" 2>/dev/null || true
+          [ -f "$GITHUB_WORKSPACE/disk-monitor.log" ] && \
+            cp -v "$GITHUB_WORKSPACE/disk-monitor.log" "$GITHUB_WORKSPACE/artifacts/" || true
           echo "--- disk after build ---"
           df -h /
           echo "--- collected ---"
