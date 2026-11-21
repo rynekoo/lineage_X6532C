@@ -207,6 +207,33 @@ jobs:
           df -h /
           du -sh "$BUILD_DIR" 2>/dev/null || true
 
+      # Lineage rewrites every cc module that lists device_kernel_headers to
+      # generated_kernel_headers (build/soong/cc/cc.go, rewriteHeaderLibs),
+      # and that module's rule runs `make headers_install` inside
+      # $(TARGET_KERNEL_SOURCE). This device ships a prebuilt GKI kernel and
+      # has no kernel source tree, so the rewrite is dropped here and the
+      # AOSP placeholder module is used unchanged. bionic's libc already
+      # exports kernel/uapi to every module that links libc, which is what
+      # libtinycompress needs (sound/asound.h, sound/compress_offload.h).
+      - name: Keep AOSP kernel headers for the prebuilt kernel
+        run: |
+          cd "$BUILD_DIR"
+          awk '
+            /Replace device_kernel_headers with generated_kernel_headers/ { skip = 1; next }
+            skip == 1 && /^\t\t\t\t}$/ {
+              skip = 0
+              print "\t\t\t\t// This device ships a prebuilt kernel and has no kernel source"
+              print "\t\t\t\t// tree, so keep the AOSP device_kernel_headers placeholder"
+              print "\t\t\t\t// instead of redirecting to generated_kernel_headers."
+              next
+            }
+            skip == 1 { next }
+            { print }
+          ' build/soong/cc/cc.go > cc.go.patched
+          grep -q "keep the AOSP device_kernel_headers placeholder" cc.go.patched
+          grep -c "generated_kernel_headers" cc.go.patched || true
+          mv cc.go.patched build/soong/cc/cc.go
+
       # Parsing the whole module graph costs a minute and proves the trims
       # above did not remove anything a blueprint refers to. The second
       # command exercises the repo stub through the real build rule, which
@@ -217,6 +244,9 @@ jobs:
           source build/envsetup.sh
           lunch lineage_X6532C-userdebug
           m nothing
+          # libtinycompress is the only module here that asks for kernel
+          # headers, so building it proves the patch below is sufficient.
+          m libtinycompress
           m "out/target/product/$DEVICE/obj/ETC/build-manifest_intermediates/build-manifest.xml"
           wc -c "out/target/product/$DEVICE/obj/ETC/build-manifest_intermediates/build-manifest.xml"
 
