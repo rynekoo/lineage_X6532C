@@ -193,12 +193,13 @@ jobs:
 
           rm -rf prebuilts/qemu-kernel
 
-          # ABI dumps only feed `m abidiff`, the gradle plugin prebuilts only
-          # feed gradle builds, the remote execution client only matters for
-          # USE_RBE, and the emulator prebuilts only feed the emulator images.
-          # None of the four is reachable from `droid`; `m nothing` below
-          # fails loudly if any blueprint still points into them.
-          for d in abi-dumps remoteexecution-client gradle-plugin android-emulator; do
+          # ABI dumps only feed `m abidiff`, the remote execution client only
+          # matters for USE_RBE, and the emulator prebuilts only feed the
+          # emulator images. None of the three is reachable from `droid`;
+          # `m nothing` below fails loudly if a blueprint still points into
+          # them. prebuilts/gradle-plugin is NOT touched: its Android.bp also
+          # defines metalava-gradle-plugin-deps, which tools/metalava needs.
+          for d in abi-dumps remoteexecution-client android-emulator; do
             if [ -d "prebuilts/$d" ]; then
               du -sh "prebuilts/$d"
               rm -rf "prebuilts/$d"
