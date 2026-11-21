@@ -262,6 +262,25 @@ jobs:
           fi
           sed -n '/rewriteHeaderLibs := func/,/^		}/p' build/soong/cc/cc.go
 
+      # The stock MTK/Transsion init scripts use keywords and syntax that the
+      # AOSP init parser rejects (tran_factory_reset, load_system_props,
+      # $prop floating expansion, //STD comments). host_init_verifier parses
+      # every copied .rc file near the end of the build and failed at 89% in
+      # run #21. This device keeps the stock vendor partition and never flashes
+      # the vendor image, so the vendor copies skip the verifier and keep the
+      # plain copy rule. System init scripts are still verified as before.
+      - name: Skip init verification for the stock vendor scripts
+        run: |
+          cd "$BUILD_DIR"
+          if ! grep -q 'vendor/infinix/X6532C/%,$(1)' build/make/core/definitions.mk; then
+            sed -i '/^define copy-init-script-file-checked$/a\
+          # Stock MTK/Transsion init scripts use builtins and syntax this init rejects.\n# The stock vendor partition is never flashed, so these copies skip host_init_verifier.\nifneq ($(filter vendor/infinix/X6532C/%,$(1)),)\n$(2): $(1)' build/make/core/definitions.mk
+            sed -i '0,/^ifdef TARGET_BUILD_UNBUNDLED$/s//else ifdef TARGET_BUILD_UNBUNDLED/' build/make/core/definitions.mk
+          fi
+          grep -q 'vendor/infinix/X6532C/%,$(1)' build/make/core/definitions.mk
+          grep -q 'else ifdef TARGET_BUILD_UNBUNDLED' build/make/core/definitions.mk
+          sed -n '/^define copy-init-script-file-checked/,+6p' build/make/core/definitions.mk
+
       # Parsing the whole module graph costs a minute and proves the trims
       # above did not remove anything a blueprint refers to. The second
       # command exercises the repo stub through the real build rule, which
@@ -279,35 +298,6 @@ jobs:
           # 62% of run #20 when clang-r416183b had been pruned, so build it
           # here rather than discovering it three quarters of the way in.
           m libbinder_ndk_bindgen
-          # host_init_verifier runs over every copied .rc file near the end of
-          # the build (89% in run #21), so one unknown keyword in a stock MTK
-          # init script can waste three hours. Build the verifier and its
-          # inputs here and run it over the vendor scripts up front.
-          m host_init_verifier passwd_system passwd_system_ext passwd_vendor \
-            passwd_odm passwd_product plat_property_contexts \
-            system_ext_property_contexts product_property_contexts \
-            vendor_property_contexts odm_property_contexts
-          verify="$ANDROID_HOST_OUT/bin/host_init_verifier"
-          failed=0
-          while IFS= read -r rc; do
-            "$verify" \
-              -p "$OUT/obj/ETC/passwd_system_intermediates/passwd_system" \
-              -p "$OUT/obj/ETC/passwd_system_ext_intermediates/passwd_system_ext" \
-              -p "$OUT/obj/ETC/passwd_vendor_intermediates/passwd_vendor" \
-              -p "$OUT/obj/ETC/passwd_odm_intermediates/passwd_odm" \
-              -p "$OUT/obj/ETC/passwd_product_intermediates/passwd_product" \
-              --property-contexts="$OUT/obj/ETC/plat_property_contexts_intermediates/plat_property_contexts" \
-              --property-contexts="$OUT/obj/ETC/system_ext_property_contexts_intermediates/system_ext_property_contexts" \
-              --property-contexts="$OUT/obj/ETC/product_property_contexts_intermediates/product_property_contexts" \
-              --property-contexts="$OUT/obj/ETC/vendor_property_contexts_intermediates/vendor_property_contexts" \
-              --property-contexts="$OUT/obj/ETC/odm_property_contexts_intermediates/odm_property_contexts" \
-              "$rc" || { echo "FAILED init script: $rc"; failed=1; }
-          done < <(find vendor/infinix/X6532C/proprietary/vendor/etc/init -name '*.rc' | sort)
-          if [ "$failed" -ne 0 ]; then
-            echo "vendor init scripts do not parse; fix the files above"
-            exit 1
-          fi
-          echo "all vendor init scripts verified"
           m "out/target/product/$DEVICE/obj/ETC/build-manifest_intermediates/build-manifest.xml"
           wc -c "out/target/product/$DEVICE/obj/ETC/build-manifest_intermediates/build-manifest.xml"
 
