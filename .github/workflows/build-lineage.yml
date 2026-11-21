@@ -193,13 +193,14 @@ jobs:
 
           rm -rf prebuilts/qemu-kernel
 
-          # ABI dumps only feed `m abidiff`, the remote execution client only
-          # matters for USE_RBE, and the emulator prebuilts only feed the
-          # emulator images. None of the three is reachable from `droid`;
-          # `m nothing` below fails loudly if a blueprint still points into
-          # them. prebuilts/gradle-plugin is NOT touched: its Android.bp also
-          # defines metalava-gradle-plugin-deps, which tools/metalava needs.
-          for d in abi-dumps remoteexecution-client android-emulator; do
+          # The remote execution client only matters for USE_RBE and the
+          # emulator prebuilts only feed the emulator images; neither is
+          # reachable from `droid`, and `m nothing` below fails loudly if a
+          # blueprint still points into them. prebuilts/gradle-plugin and
+          # prebuilts/abi-dumps are NOT touched: their Android.bp files define
+          # modules other trees depend on (metalava-gradle-plugin-deps,
+          # vndk_abi_dump_zip), and soong resolves those at parse time.
+          for d in remoteexecution-client android-emulator; do
             if [ -d "prebuilts/$d" ]; then
               du -sh "prebuilts/$d"
               rm -rf "prebuilts/$d"
