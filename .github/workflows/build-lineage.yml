@@ -12,9 +12,9 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: "Soong target (bacon, systemimage, otapackage, ...)"
+        description: "Soong target(s) (bacon, otapackage, or a space separated image list)"
         required: false
-        default: "bacon"
+        default: "systemimage system_extimage productimage vendorimage bootimage vendor_bootimage dtboimage vbmetaimage vbmeta_systemimage vbmeta_vendorimage"
       sync_only:
         description: "Only sync the tree, skip the build"
         type: boolean
@@ -147,15 +147,20 @@ jobs:
           du -sh .repo 2>/dev/null || true
           df -h /
 
+      # Images only by default. bacon additionally builds target_files,
+      # super.img and the payload OTA, which duplicates every image on disk
+      # (~15 GB) and spends 20-30 min compressing them, for a zip that the
+      # stock recovery rejects anyway (AOSP test-keys). super.img is
+      # reassembled from these images after the run.
       - name: Build
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.sync_only != true }}
         run: |
           cd "$BUILD_DIR"
           source build/envsetup.sh
           lunch lineage_X6532C-userdebug
-          mka "${TARGET:-bacon}" -j$(nproc)
+          mka ${TARGET:-systemimage} -j$(nproc)
         env:
-          TARGET: ${{ github.event.inputs.target || 'bacon' }}
+          TARGET: ${{ github.event.inputs.target || 'systemimage system_extimage productimage vendorimage bootimage vendor_bootimage dtboimage vbmetaimage vbmeta_systemimage vbmeta_vendorimage' }}
 
       - name: Collect artifacts
         if: always()
