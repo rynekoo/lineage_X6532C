@@ -41,7 +41,12 @@ on:
       - "**.md"
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # The -v2 suffix is deliberate. Run 29 was cancelled at the runner level
+  # while GitHub kept the run record in_progress, so it never released its
+  # slot in the group and every later run on main stayed pending behind it.
+  # Bumping the group name puts new runs in a fresh slot. Raise the suffix
+  # again if a run is ever orphaned the same way.
+  group: ${{ github.workflow }}-${{ github.ref }}-v2
   cancel-in-progress: true
 
 env:
