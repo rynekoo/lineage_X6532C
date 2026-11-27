@@ -9,9 +9,10 @@ name: Build LineageOS 20.0 (X6532C)
 # repository only has to carry the workflow.
 #
 # Android 13 versus the Android 12 vendor partition, in one place:
-#   * The vendor is VNDK 31; the platform is VNDK 33. The device tree sets
-#     PRODUCT_EXTRA_VNDK_VERSIONS := 31 so the v31 snapshot libraries and
-#     ld.config.31.txt ship from prebuilts/vndk/v31.
+#   * The vendor is VNDK 31; the platform is VNDK 33. The device tree installs
+#     com.android.vndk.v31 (an apex_vndk module, bind-mounted at
+#     /apex/com.android.vndk.v31), which is how Android 13 serves a vendor that
+#     asks for an older VNDK.
 #   * The generic ramdisk stays in boot.img (no init_boot), matching the stock
 #     layout where init_boot_a.img is 8 MiB of zeroes.
 #   * vendor_boot is built but never flashed: TWRP lives there.
@@ -223,8 +224,8 @@ jobs:
       #    compiler (cc/config/global.go: ClangDefaultVersion) and the
       #    RenderScript one (RSClangVersion). Only those two are kept.
       #
-      # prebuilts/vndk/v31 stays: PRODUCT_EXTRA_VNDK_VERSIONS := 31 installs
-      # its snapshot libraries, and Soong globs the sibling version
+      # prebuilts/vndk/v31 stays: com.android.vndk.v31 bundles the v31 VNDK
+      # libraries from that snapshot, and Soong globs the sibling version
       # directories at parse time, so pruning them is not free.
       #
       # cts/ and test/ must stay even though they are not built: they

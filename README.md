@@ -21,11 +21,16 @@ Treble upgrade path.
 
 The device tree answers it in one place each:
 
-- `PRODUCT_EXTRA_VNDK_VERSIONS := 31` installs the VNDK 31 snapshot from
-  `prebuilts/vndk/v31`, so `/system/lib/vndk-31`, `/system/lib/vndk-sp-31` and
-  `ld.config.31.txt` exist and the vendor linker namespace resolves its libraries
-  exactly as under the stock Android 12 system. The platform itself is built at
-  `BOARD_VNDK_VERSION := current` (33).
+- `PRODUCT_PACKAGES += com.android.vndk.v31` installs the VNDK 31 APEX.
+  Android 13 delivers older VNDKs as an `apex_vndk` module, not as a
+  `/system/lib/vndk-31` directory: the libraries land in
+  `/system_ext/apex/com.android.vndk.v31` and init bind-mounts them at
+  `/apex/com.android.vndk.v31`, which is what `linkerconfig` reads when it
+  builds the vendor linker namespace from `ro.vndk.version=31`. The platform
+  itself is built at `BOARD_VNDK_VERSION := current` (33).
+- `ro.product.first_api_level` is restated as 31 on `/product`, because the
+  stock vendor copy says 34 (Android 14) and that implies a VINTF level no
+  Android 13 framework can satisfy.
 - The vendor partition is never rebuilt into the flash set. The blob repository
   exists to satisfy the build; `docs/FLASHING.md` does not flash it.
 
