@@ -3,14 +3,14 @@
   Reference copy of the local manifest that the GitHub Actions workflow writes
   into .repo/local_manifests/ at build time.
 
-  device/infinix/X6532C  <- ryu4nn/android_device_infinix_X6532C (lineage-19.1)
+  device/infinix/X6532C  <- ryu4nn/android_device_infinix_X6532C (lineage-20.0)
   vendor/infinix/X6532C  <- ryu4nn/android_vendor_infinix_X6532C (main)
 -->
 <manifest>
   <project name="ryu4nn/android_device_infinix_X6532C"
            path="device/infinix/X6532C"
            remote="github"
-           revision="lineage-19.1" />
+           revision="lineage-20.0" />
   <project name="ryu4nn/android_vendor_infinix_X6532C"
            path="vendor/infinix/X6532C"
            remote="github"

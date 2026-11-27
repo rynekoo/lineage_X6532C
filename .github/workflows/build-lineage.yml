@@ -29,6 +29,11 @@ on:
         type: boolean
         required: false
         default: false
+      artifact_super:
+        description: "Also ship super.img (5 GiB raw, ~1.2 GiB zstd) for a whole-super flash"
+        type: boolean
+        required: false
+        default: false
   push:
     branches: [ main ]
     paths-ignore:
@@ -93,7 +98,7 @@ jobs:
             git git-lfs gnupg gperf imagemagick lib32readline-dev lib32z1-dev \
             libelf-dev liblz4-tool libsdl1.2-dev libssl-dev libxml2 libxml2-utils \
             lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev \
-            openjdk-11-jdk \
+            zstd openjdk-11-jdk \
             libncurses5 libtinfo5
           # The RenderScript prebuilt is LLVM 3.8 (prebuilts/clang/host/linux-x86/
           # clang-3289846) and still links against libncurses.so.5/libtinfo.so.5,
@@ -392,27 +397,63 @@ jobs:
         env:
           TARGET: ${{ github.event.inputs.target || 'droid' }}
 
+      # ------------------------------------------------------------------
+      # Artifacts, compressed.
+      #
+      # Raw ext4 images are large and mostly zeroes. The flash set is packed
+      # into one deflated archive (-9) instead of being uploaded as loose
+      # 1.2 GB files, which keeps the artifact around 0.8-0.9 GB instead of
+      # 2.5 GB. Nothing is duplicated: super.img would contain system,
+      # system_ext, product and vendor a second time, so it only ships when
+      # explicitly requested and then as zstd.
+      #
+      # vendor.img and vendor_boot.img are never in the flash set. The vendor
+      # partition is the fixed Android 12 reference this ROM is built against,
+      # and TWRP lives in vendor_boot; docs/FLASHING.md explains the rest.
+      # ------------------------------------------------------------------
       - name: Collect artifacts
         if: always()
         run: |
+          set +e
           mkdir -p "$GITHUB_WORKSPACE/artifacts"
           OUT="$BUILD_DIR/out/target/product/$DEVICE"
+          A="$GITHUB_WORKSPACE/artifacts"
           echo "--- $OUT ---"
-          ls -la "$OUT" 2>/dev/null || true
-          cp -v "$OUT"/*.zip  "$GITHUB_WORKSPACE/artifacts/" 2>/dev/null || true
-          # Every image except userdata (that one is a blank template the
-          # device regenerates on first boot).
-          for i in boot vendor_boot dtbo vbmeta vbmeta_system vbmeta_vendor \
-                   super super_empty system system_ext vendor product; do
-            [ -f "$OUT/$i.img" ] && cp -v "$OUT/$i.img" "$GITHUB_WORKSPACE/artifacts/"
+          ls -la "$OUT" 2>/dev/null
+
+          FLASH="boot dtbo vbmeta vbmeta_system vbmeta_vendor system system_ext product super_empty"
+          mkdir -p "$A/flash"
+          for i in $FLASH; do
+            if [ -f "$OUT/$i.img" ]; then
+              cp "$OUT/$i.img" "$A/flash/"
+              echo "flash set: $i.img $(du -h "$OUT/$i.img" | cut -f1)"
+            fi
           done
-          cp -v "$OUT"/recovery/* "$GITHUB_WORKSPACE/artifacts/" 2>/dev/null || true
+
+          if [ -d "$A/flash" ] && [ -n "$(ls -A "$A/flash")" ]; then
+            ZIP="$A/lineage-20.0-X6532C-${GITHUB_RUN_NUMBER}-images.zip"
+            echo "--- compressing flash set ---"
+            ( cd "$A/flash" && zip -9 -q "$ZIP" ./* )
+            ( cd "$A/flash" && sha256sum ./* ) > "$A/SHA256SUMS"
+            rm -rf "$A/flash"
+            ls -la "$ZIP"
+            cat "$A/SHA256SUMS"
+          else
+            echo "no images produced; nothing to package"
+          fi
+
+          if [ -f "$OUT/super.img" ] && [ "${{ inputs.artifact_super }}" = "true" ]; then
+            echo "--- compressing super.img ---"
+            zstd -T0 -12 -q -f -o "$A/super.img.zst" "$OUT/super.img"
+            sha256sum "$A/super.img.zst" >> "$A/SHA256SUMS"
+          fi
+
           [ -f "$GITHUB_WORKSPACE/disk-monitor.log" ] && \
-            cp -v "$GITHUB_WORKSPACE/disk-monitor.log" "$GITHUB_WORKSPACE/artifacts/" || true
+            cp "$GITHUB_WORKSPACE/disk-monitor.log" "$A/" || true
           echo "--- disk after build ---"
           df -h /
           echo "--- collected ---"
-          ls -la "$GITHUB_WORKSPACE/artifacts" 2>/dev/null || true
+          ls -la "$A"
 
       - name: Upload artifacts
         if: always()
