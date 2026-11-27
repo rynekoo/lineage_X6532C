@@ -1,12 +1,21 @@
-name: Build LineageOS 19.1 (X6532C)
+name: Build LineageOS 20.0 (X6532C)
 
 # ROM build for the Infinix Smart 9 HD (X6532C, MT6765).
 #
 # The sources live in the rom-dev repos under the ryu4nn account:
-#   device/infinix/X6532C  <- ryu4nn/android_device_infinix_X6532C (lineage-19.1)
+#   device/infinix/X6532C  <- ryu4nn/android_device_infinix_X6532C (lineage-20.0)
 #   vendor/infinix/X6532C  <- ryu4nn/android_vendor_infinix_X6532C (main)
 # They are pulled in through a local manifest written at run time, so this
 # repository only has to carry the workflow.
+#
+# Android 13 versus the Android 12 vendor partition, in one place:
+#   * The vendor is VNDK 31; the platform is VNDK 33. The device tree sets
+#     PRODUCT_EXTRA_VNDK_VERSIONS := 31 so the v31 snapshot libraries and
+#     ld.config.31.txt ship from prebuilts/vndk/v31.
+#   * The generic ramdisk stays in boot.img (no init_boot), matching the stock
+#     layout where init_boot_a.img is 8 MiB of zeroes.
+#   * vendor_boot is built but never flashed: TWRP lives there.
+#   * VINTF enforcement is disabled for this bring-up run; see device.mk.
 
 on:
   workflow_dispatch:
@@ -31,9 +40,9 @@ concurrency:
 
 env:
   DEVICE: X6532C
-  LINEAGE_BRANCH: lineage-19.1
+  LINEAGE_BRANCH: lineage-20.0
   DEVICE_TREE_REPO: ryu4nn/android_device_infinix_X6532C
-  DEVICE_TREE_REV: lineage-19.1
+  DEVICE_TREE_REV: lineage-20.0
   VENDOR_REPO: ryu4nn/android_vendor_infinix_X6532C
   VENDOR_REV: main
   BUILD_DIR: /home/runner/lineage
@@ -48,9 +57,10 @@ jobs:
         uses: actions/checkout@v4
 
       # ------------------------------------------------------------------
-      # The stock GitHub runner has ~65 GB free. A LineageOS 19.1 checkout
-      # plus out/ needs almost all of it, so the preinstalled toolchains and
-      # SDKs that this build never touches are removed first.
+      # The stock GitHub runner has ~65 GB free. A LineageOS checkout plus
+      # out/ plus the 483 MB GApps payload needs almost all of it, so the
+      # preinstalled toolchains and SDKs that this build never touches are
+      # removed first.
       # ------------------------------------------------------------------
       - name: Free disk space
         run: |
@@ -116,7 +126,7 @@ jobs:
             <project name="ryu4nn/android_device_infinix_X6532C"
                      path="device/infinix/X6532C"
                      remote="github"
-                     revision="lineage-19.1" />
+                     revision="lineage-20.0" />
             <project name="ryu4nn/android_vendor_infinix_X6532C"
                      path="vendor/infinix/X6532C"
                      remote="github"
@@ -134,6 +144,35 @@ jobs:
           du -sh "$BUILD_DIR" 2>/dev/null || true
           echo "--- device tree present? ---"
           ls -la device/infinix/X6532C/BoardConfig.mk vendor/infinix/X6532C/X6532C-vendor.mk
+
+      # ------------------------------------------------------------------
+      # Google apps.
+      #
+      # Nothing proprietary is committed. tools/fetch-gapps.sh downloads the
+      # pinned MindTheGapps 13.0.0 arm archive (227 MB), checks its sha256 and
+      # writes gapps/gapps.mk with one PRODUCT_COPY_FILES line per payload
+      # file. device.mk inherits that makefile only when it exists, so a build
+      # without this step still produces vanilla LineageOS.
+      #
+      # The arm archive is the right one: this device is armeabi-v7a only and
+      # ro.vendor.product.cpu.abilist64 is empty, so arm64 libraries would
+      # never be loaded.
+      #
+      # MindTheGapps 13 keeps its payload under system/product and
+      # system/system_ext, which are separate logical partitions here, so the
+      # script maps the three top-level directories to the three image roots.
+      # 467 MB lands in product.img and 16 MB in system_ext.img, which is why
+      # the disk trims below exist.
+      # ------------------------------------------------------------------
+      - name: Fetch Google apps
+        run: |
+          cd "$BUILD_DIR/device/infinix/X6532C"
+          ./tools/fetch-gapps.sh
+          echo "--- gapps.mk ---"
+          head -8 gapps/gapps.mk
+          grep -c '^PRODUCT_COPY_FILES' gapps/gapps.mk
+          echo "--- disk after gapps ---"
+          df -h /
 
       # ------------------------------------------------------------------
       # A depth=1 LineageOS 19.1 checkout stores each project twice: the
@@ -168,16 +207,20 @@ jobs:
           df -h /
 
       # ------------------------------------------------------------------
-      # out/ needs ~50 GB and this runner has ~54 GB left after the
+      # out/ needs ~50 GB, the GApps payload adds 483 MB to the checkout and
+      # ~483 MB more to the images, and this runner has ~54 GB left after the
       # checkout. Two trims are safe:
       #
       #  * prebuilts/qemu-kernel is an emulator kernel referenced from
       #    board makefiles, not from any Android.bp.
       #  * prebuilts/clang/host/linux-x86 carries every toolchain revision
-      #    AOSP supports. A 19.1 device build uses exactly two: the
-      #    platform compiler (cc/config/global.go: ClangDefaultVersion =
-      #    "clang-r416183b1") and the RenderScript one (RSClangVersion =
-      #    "clang-3289846"). Only those two are kept.
+      #    AOSP supports. A device build uses exactly two: the platform
+      #    compiler (cc/config/global.go: ClangDefaultVersion) and the
+      #    RenderScript one (RSClangVersion). Only those two are kept.
+      #
+      # prebuilts/vndk/v31 stays: PRODUCT_EXTRA_VNDK_VERSIONS := 31 installs
+      # its snapshot libraries, and Soong globs the sibling version
+      # directories at parse time, so pruning them is not free.
       #
       # cts/ and test/ must stay even though they are not built: they
       # define VtsHalDriverDefaults, vts_proto_fuzzer_default and
@@ -375,7 +418,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: lineage-19.1-X6532C-${{ github.run_number }}
+          name: lineage-20.0-X6532C-${{ github.run_number }}
           path: artifacts/
           if-no-files-found: warn
           retention-days: 14
